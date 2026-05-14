@@ -18,16 +18,44 @@ from datetime import datetime
 
 
 def find_store_ts() -> pathlib.Path:
-    home = pathlib.Path.home()
-    candidates = []
-    for base in [home / ".nvm/versions/node",
-                 home / ".bun/install/global/node_modules",
-                 pathlib.Path("/usr/local/lib/node_modules"),
-                 pathlib.Path("/usr/lib/node_modules")]:
-        if base.exists():
-            candidates.extend(base.glob("**/@tobilu/qmd/src/store.ts"))
-            candidates.extend(base.glob("**/qmd/src/store.ts"))
-    candidates = [c for c in candidates if "node_modules/@tobilu/qmd" in str(c) or "/qmd/src/store.ts" in str(c)]
+    """Locate qmd's store.ts. Tries `npm root -g` first (most reliable across
+    nvm/setup-node/system installs/hostedtoolcache), then falls back to a
+    glob of common install prefixes."""
+    import subprocess
+
+    candidates: list[pathlib.Path] = []
+
+    # 1. Ask npm directly — works on macOS Homebrew, nvm, setup-node, Linux distros.
+    try:
+        root = subprocess.run(
+            ["npm", "root", "-g"], capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.strip()
+        if root:
+            for sub in ("@tobilu/qmd/src/store.ts", "qmd/src/store.ts"):
+                p = pathlib.Path(root) / sub
+                if p.exists():
+                    candidates.append(p)
+    except Exception:
+        pass
+
+    # 2. Fallback: glob common install dirs.
+    if not candidates:
+        home = pathlib.Path.home()
+        for base in [
+            home / ".nvm/versions/node",
+            home / ".bun/install/global/node_modules",
+            pathlib.Path("/opt/hostedtoolcache/node"),     # GitHub Actions setup-node
+            pathlib.Path("/usr/local/lib/node_modules"),
+            pathlib.Path("/usr/lib/node_modules"),
+        ]:
+            if base.exists():
+                candidates.extend(base.glob("**/@tobilu/qmd/src/store.ts"))
+                candidates.extend(base.glob("**/qmd/src/store.ts"))
+        candidates = [
+            c for c in candidates
+            if "node_modules/@tobilu/qmd" in str(c) or "/qmd/src/store.ts" in str(c)
+        ]
+
     if not candidates:
         sys.exit("ERROR: cannot locate qmd's store.ts. Is @tobilu/qmd installed globally?")
     return sorted(set(candidates), key=lambda p: str(p))[0]

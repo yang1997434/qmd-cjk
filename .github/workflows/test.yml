@@ -1,0 +1,77 @@
+name: test-install
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  install-and-search:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Set up Node.js (for npm)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install qmd
+        run: |
+          npm install -g @tobilu/qmd
+          which qmd
+          qmd --help | head -5
+
+      - name: Run install.sh
+        run: bash install.sh
+
+      - name: Seed test vault
+        run: |
+          mkdir -p /tmp/test-vault
+          cat > /tmp/test-vault/cn.md <<EOF
+          # 测试文档
+
+          这是关于节点扩容、微信绑定、数据库迁移的中文笔记。
+          也包含一些英文术语：hermes, sqlite, fts5.
+          EOF
+          cat > /tmp/test-vault/en.md <<EOF
+          # English test
+
+          Project notes about agents, runtime, deployment.
+          EOF
+          qmd collection add /tmp/test-vault --name testvault --mask '**/*.md' || true
+          qmd update || true
+
+      - name: Search — Chinese phrase
+        run: |
+          set -x
+          OUT=$(qmd search '节点扩容' --files 2>&1)
+          echo "$OUT"
+          echo "$OUT" | grep -q 'cn.md' || (echo "FAIL: Chinese phrase did not match"; exit 1)
+
+      - name: Search — English word
+        run: |
+          set -x
+          OUT=$(qmd search 'hermes' --files 2>&1)
+          echo "$OUT"
+          echo "$OUT" | grep -q 'cn.md' || (echo "FAIL: English word did not match"; exit 1)
+
+      - name: Search — mixed CJK + English
+        run: |
+          set -x
+          OUT=$(qmd search 'hermes 节点' --files 2>&1)
+          echo "$OUT"
+          echo "$OUT" | grep -q 'cn.md' || (echo "FAIL: mixed query did not match"; exit 1)
+
+      - name: Idempotency — re-run install.sh
+        run: bash install.sh
